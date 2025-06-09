@@ -1,7 +1,7 @@
+import argparse
 import os
 import os.path as osp
 import random
-import sys
 import time
 
 import numpy as np
@@ -11,7 +11,7 @@ from salted import get_averages
 from salted.sys_utils import ParseConfig, get_atom_idx, read_system
 
 
-def build():
+def build(matrix_mul_method:str = "dense"):
 
     inp = ParseConfig().parse_input()
 
@@ -73,7 +73,8 @@ def build():
     """
     Calculate regression matrices in parallel or serial mode.
     """
-
+    if matrix_mul_method == "sparse":
+        matrix_mul_method = "coo"  # sparse matrices are in coo format, so use it for multiplication
     if parallel:
         print("Running in parallel mode")
         """ check partitioning """
@@ -90,7 +91,7 @@ def build():
         this_task_trainrange = trainrange[rank*blocksize:(rank+1)*blocksize]
         """ calculate and gather """
         print(f"Task {rank} handling structures: {this_task_trainrange}")
-        [Avec, Bmat] = matrices(this_task_trainrange, ntrain,av_coefs,rank)
+        [Avec, Bmat] = matrices(this_task_trainrange, ntrain,av_coefs,rank, matrix_mul_method)
         comm.Barrier()
         """ reduce matrices in slices to avoid MPI overflows """
         nslices = int(np.ceil(len(Avec) / 100.0))
@@ -102,14 +103,14 @@ def build():
     else:
         print("Running in serial mode")
         assert inp.gpr.blocksize == 0, "Please DON'T provide inp.gpr.blocksize in inp.yaml when running in serial mode"
-        [Avec, Bmat] = matrices(trainrange,ntrain,av_coefs,rank)
+        [Avec, Bmat] = matrices(trainrange,ntrain,av_coefs,rank, matrix_mul_method)
 
     if rank==0:
         np.save(osp.join(saltedpath, rdir, f"M{Menv}_zeta{zeta}", f"Avec_N{ntrain}.npy"), Avec)
         np.save(osp.join(saltedpath, rdir, f"M{Menv}_zeta{zeta}", f"Bmat_N{ntrain}.npy"), Bmat)
 
 
-def matrices(trainrange,ntrain,av_coefs,rank):
+def matrices(trainrange,ntrain,av_coefs,rank,matrix_mul_method: str = "dense"):
 
     inp = ParseConfig().parse_input()
 
@@ -157,7 +158,17 @@ def matrices(trainrange,ntrain,av_coefs,rank):
             psivec = sparse.load_npz(osp.join(
                 saltedpath, fdir, f"M{Menv}_zeta{zeta}", f"psi-nm_conf{iconf}.npz"
             ))
-            psi = psivec.toarray()
+            assert matrix_mul_method in ["dense", "coo", "csr", "csc",], \
+                f"Unknown matrix multiplication method {matrix_mul_method=}"
+            if matrix_mul_method == "dense":
+                psi = psivec.toarray()
+            elif matrix_mul_method == "coo":
+                # psi = psivec.asformat(matrix_mul_method)
+                psi = psivec  # it is already in COO format
+            elif matrix_mul_method in ["csr", "csc"]:
+                psi = psivec.asformat(matrix_mul_method)
+            else:
+                raise ValueError(f"Unknown matrix multiplication method {matrix_mul_method=}")
 
             if inp.system.average:
 
@@ -178,9 +189,15 @@ def matrices(trainrange,ntrain,av_coefs,rank):
 
             ref_projs = np.dot(over,ref_coefs)
 
-            Avec += np.dot(psi.T,ref_projs)
-            Bmat += np.dot(psi.T,np.dot(over,psi))
-
+            if matrix_mul_method == "dense":
+                Avec += np.dot(psi.T,ref_projs)
+                Bmat += np.dot(psi.T,np.dot(over,psi))
+            elif matrix_mul_method in ["coo", "csr", "csc"]:
+                psi_T = psi.T
+                Avec += psi_T.dot(ref_projs)
+                Bmat += psi_T.dot(psi_T.dot(over).T)
+            else:
+                raise ValueError(f"Unknown matrix multiplication method {matrix_mul_method=}")
 
         elif inp.salted.saltedtype=="density-response":
 
@@ -211,4 +228,14 @@ def matrices(trainrange,ntrain,av_coefs,rank):
     return [Avec,Bmat]
 
 if __name__ == "__main__":
-    build()
+    parser = argparse.ArgumentParser(description="Build Hessian matrix for SALTED system.")
+    parser.add_argument(
+        "--matmul",
+        "-m",
+        choices=["dense", "sparse", "coo", "csr", "csc"],
+        default="dense",
+        help="Matrix multiplication format to use (default: dense)"
+    )
+    args = parser.parse_args()
+
+    build(args.matmul)
