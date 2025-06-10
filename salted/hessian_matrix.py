@@ -169,6 +169,7 @@ def matrices(trainrange,ntrain,av_coefs,rank,matrix_mul_method: str = "dense"):
                 psi = psivec.asformat(matrix_mul_method)
             else:
                 raise ValueError(f"Unknown matrix multiplication method {matrix_mul_method=}")
+            print("conf:", iconf+1, "psi loaded", f"{time.time()-start:.2f}s start till now", flush=True)
 
             if inp.system.average:
 
@@ -186,16 +187,22 @@ def matrices(trainrange,ntrain,av_coefs,rank,matrix_mul_method: str = "dense"):
 
                 # subtract average
                 ref_coefs -= Av_coeffs
+            print("conf:", iconf+1, "ref_coefs constructed", f"{time.time()-start:.2f}s start till now", flush=True)
 
             ref_projs = np.dot(over,ref_coefs)
 
             if matrix_mul_method == "dense":
                 Avec += np.dot(psi.T,ref_projs)
+                print("conf:", iconf+1, "Avec computed", f"{time.time()-start:.2f}s start till now", flush=True)
                 Bmat += np.dot(psi.T,np.dot(over,psi))
+                print("conf:", iconf+1, "Bmat computed", f"{time.time()-start:.2f}s start till now", flush=True)
             elif matrix_mul_method in ["coo", "csr", "csc"]:
                 psi_T = psi.T
+                print("conf:", iconf+1, "psi transposed", f"{time.time()-start:.2f}s start till now", flush=True)
                 Avec += psi_T.dot(ref_projs)
+                print("conf:", iconf+1, "Avec computed", f"{time.time()-start:.2f}s start till now", flush=True)
                 Bmat += psi_T.dot(psi_T.dot(over).T)
+                print("conf:", iconf+1, "Bmat computed", f"{time.time()-start:.2f}s start till now", flush=True)
             else:
                 raise ValueError(f"Unknown matrix multiplication method {matrix_mul_method=}")
 
