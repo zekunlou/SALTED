@@ -219,7 +219,7 @@ def matrices(trainrange,ntrain,av_coefs,rank,matrix_mul_method: str = "dense"):
                 print("conf:", iconf+1, "psi transposed", f"{time.time()-start:.2f}s start till now", flush=True)
                 Avec += dot_product_mkl(psi_T, ref_projs, dense=True)
                 print("conf:", iconf+1, "Avec computed", f"{time.time()-start:.2f}s start till now", flush=True)
-                Bmat += dot_product_mkl(psi_T, dot_product_mkl(psi_T, over).T, dense=True)
+                Bmat += dot_product_mkl(psi_T, dot_product_mkl(over, psi, dense=True), dense=True)
             else:
                 raise ValueError(f"Unknown matrix multiplication method {matrix_mul_method=}")
 
