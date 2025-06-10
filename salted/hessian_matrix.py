@@ -6,6 +6,7 @@ import time
 
 import numpy as np
 from scipy import sparse
+from sparse_dot_mkl import dot_product_mkl
 
 from salted import get_averages
 from salted.sys_utils import ParseConfig, get_atom_idx, read_system
@@ -73,6 +74,7 @@ def build(matrix_mul_method:str = "dense"):
     """
     Calculate regression matrices in parallel or serial mode.
     """
+    matrix_mul_method = matrix_mul_method.lower()
     if matrix_mul_method == "sparse":
         matrix_mul_method = "coo"  # sparse matrices are in coo format, so use it for multiplication
     if parallel:
@@ -158,15 +160,17 @@ def matrices(trainrange,ntrain,av_coefs,rank,matrix_mul_method: str = "dense"):
             psivec = sparse.load_npz(osp.join(
                 saltedpath, fdir, f"M{Menv}_zeta{zeta}", f"psi-nm_conf{iconf}.npz"
             ))
-            assert matrix_mul_method in ["dense", "coo", "csr", "csc",], \
+            assert matrix_mul_method in ["dense", "coo", "csr", "csc", "csr_mkl", "csc_mkl",], \
                 f"Unknown matrix multiplication method {matrix_mul_method=}"
             if matrix_mul_method == "dense":
                 psi = psivec.toarray()
-            elif matrix_mul_method == "coo":
+            elif "coo" in matrix_mul_method:
                 # psi = psivec.asformat(matrix_mul_method)
                 psi = psivec  # it is already in COO format
-            elif matrix_mul_method in ["csr", "csc"]:
-                psi = psivec.asformat(matrix_mul_method)
+            elif "csr" in matrix_mul_method:
+                psi = psivec.asformat("csr")
+            elif "csc" in matrix_mul_method:
+                psi = psivec.asformat("csc")
             else:
                 raise ValueError(f"Unknown matrix multiplication method {matrix_mul_method=}")
             print("conf:", iconf+1, "psi loaded", f"{time.time()-start:.2f}s start till now", flush=True)
@@ -196,13 +200,26 @@ def matrices(trainrange,ntrain,av_coefs,rank,matrix_mul_method: str = "dense"):
                 print("conf:", iconf+1, "Avec computed", f"{time.time()-start:.2f}s start till now", flush=True)
                 Bmat += np.dot(psi.T,np.dot(over,psi))
                 print("conf:", iconf+1, "Bmat computed", f"{time.time()-start:.2f}s start till now", flush=True)
-            elif matrix_mul_method in ["coo", "csr", "csc"]:
+            elif (
+                (matrix_mul_method == "coo")
+                or (matrix_mul_method == "csr")
+                or (matrix_mul_method == "csc")
+            ):
                 psi_T = psi.T
                 print("conf:", iconf+1, "psi transposed", f"{time.time()-start:.2f}s start till now", flush=True)
                 Avec += psi_T.dot(ref_projs)
                 print("conf:", iconf+1, "Avec computed", f"{time.time()-start:.2f}s start till now", flush=True)
                 Bmat += psi_T.dot(psi_T.dot(over).T)
                 print("conf:", iconf+1, "Bmat computed", f"{time.time()-start:.2f}s start till now", flush=True)
+            elif (
+                (matrix_mul_method == "csr_mkl")
+                or (matrix_mul_method == "csc_mkl")
+            ):
+                psi_T = psi.T
+                print("conf:", iconf+1, "psi transposed", f"{time.time()-start:.2f}s start till now", flush=True)
+                Avec += dot_product_mkl(psi_T, ref_projs, dense=True)
+                print("conf:", iconf+1, "Avec computed", f"{time.time()-start:.2f}s start till now", flush=True)
+                Bmat += dot_product_mkl(psi_T, dot_product_mkl(psi_T, over).T, dense=True)
             else:
                 raise ValueError(f"Unknown matrix multiplication method {matrix_mul_method=}")
 
@@ -239,7 +256,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--matmul",
         "-m",
-        choices=["dense", "sparse", "coo", "csr", "csc"],
+        choices=["dense", "sparse", "coo", "csr", "csc", "csr_mkl", "csc_mkl"],
         default="dense",
         help="Matrix multiplication format to use (default: dense)"
     )
