@@ -1,18 +1,17 @@
-import argparse
 import os
 import os.path as osp
 import random
+import sys
 import time
 
 import numpy as np
 from scipy import sparse
-from sparse_dot_mkl import dot_product_mkl
 
 from salted import get_averages
 from salted.sys_utils import ParseConfig, get_atom_idx, read_system
 
 
-def build(matrix_mul_method:str = "dense"):
+def build():
 
     inp = ParseConfig().parse_input()
 
@@ -74,9 +73,7 @@ def build(matrix_mul_method:str = "dense"):
     """
     Calculate regression matrices in parallel or serial mode.
     """
-    matrix_mul_method = matrix_mul_method.lower()
-    if matrix_mul_method == "sparse":
-        matrix_mul_method = "coo"  # sparse matrices are in coo format, so use it for multiplication
+
     if parallel:
         print("Running in parallel mode")
         """ check partitioning """
@@ -93,7 +90,7 @@ def build(matrix_mul_method:str = "dense"):
         this_task_trainrange = trainrange[rank*blocksize:(rank+1)*blocksize]
         """ calculate and gather """
         print(f"Task {rank} handling structures: {this_task_trainrange}")
-        [Avec, Bmat] = matrices(this_task_trainrange, ntrain,av_coefs,rank, matrix_mul_method)
+        [Avec, Bmat] = matrices(this_task_trainrange, ntrain,av_coefs,rank)
         comm.Barrier()
         """ reduce matrices in slices to avoid MPI overflows """
         nslices = int(np.ceil(len(Avec) / 100.0))
@@ -105,14 +102,14 @@ def build(matrix_mul_method:str = "dense"):
     else:
         print("Running in serial mode")
         assert inp.gpr.blocksize == 0, "Please DON'T provide inp.gpr.blocksize in inp.yaml when running in serial mode"
-        [Avec, Bmat] = matrices(trainrange,ntrain,av_coefs,rank, matrix_mul_method)
+        [Avec, Bmat] = matrices(trainrange,ntrain,av_coefs,rank)
 
     if rank==0:
         np.save(osp.join(saltedpath, rdir, f"M{Menv}_zeta{zeta}", f"Avec_N{ntrain}.npy"), Avec)
         np.save(osp.join(saltedpath, rdir, f"M{Menv}_zeta{zeta}", f"Bmat_N{ntrain}.npy"), Bmat)
 
 
-def matrices(trainrange,ntrain,av_coefs,rank,matrix_mul_method: str = "dense"):
+def matrices(trainrange,ntrain,av_coefs,rank):
 
     inp = ParseConfig().parse_input()
 
@@ -160,20 +157,7 @@ def matrices(trainrange,ntrain,av_coefs,rank,matrix_mul_method: str = "dense"):
             psivec = sparse.load_npz(osp.join(
                 saltedpath, fdir, f"M{Menv}_zeta{zeta}", f"psi-nm_conf{iconf}.npz"
             ))
-            assert matrix_mul_method in ["dense", "coo", "csr", "csc", "csr_mkl", "csc_mkl",], \
-                f"Unknown matrix multiplication method {matrix_mul_method=}"
-            if matrix_mul_method == "dense":
-                psi = psivec.toarray()
-            elif "coo" in matrix_mul_method:
-                # psi = psivec.asformat(matrix_mul_method)
-                psi = psivec  # it is already in COO format
-            elif "csr" in matrix_mul_method:
-                psi = psivec.asformat("csr")
-            elif "csc" in matrix_mul_method:
-                psi = psivec.asformat("csc")
-            else:
-                raise ValueError(f"Unknown matrix multiplication method {matrix_mul_method=}")
-            print("conf:", iconf+1, "psi loaded", f"{time.time()-start:.2f}s start till now", flush=True)
+            psi = psivec.toarray()
 
             if inp.system.average:
 
@@ -191,37 +175,12 @@ def matrices(trainrange,ntrain,av_coefs,rank,matrix_mul_method: str = "dense"):
 
                 # subtract average
                 ref_coefs -= Av_coeffs
-            print("conf:", iconf+1, "ref_coefs constructed", f"{time.time()-start:.2f}s start till now", flush=True)
 
             ref_projs = np.dot(over,ref_coefs)
 
-            if matrix_mul_method == "dense":
-                Avec += np.dot(psi.T,ref_projs)
-                print("conf:", iconf+1, "Avec computed", f"{time.time()-start:.2f}s start till now", flush=True)
-                Bmat += np.dot(psi.T,np.dot(over,psi))
-                print("conf:", iconf+1, "Bmat computed", f"{time.time()-start:.2f}s start till now", flush=True)
-            elif (
-                (matrix_mul_method == "coo")
-                or (matrix_mul_method == "csr")
-                or (matrix_mul_method == "csc")
-            ):
-                psi_T = psi.T
-                print("conf:", iconf+1, "psi transposed", f"{time.time()-start:.2f}s start till now", flush=True)
-                Avec += psi_T.dot(ref_projs)
-                print("conf:", iconf+1, "Avec computed", f"{time.time()-start:.2f}s start till now", flush=True)
-                Bmat += psi_T.dot(psi_T.dot(over).T)
-                print("conf:", iconf+1, "Bmat computed", f"{time.time()-start:.2f}s start till now", flush=True)
-            elif (
-                (matrix_mul_method == "csr_mkl")
-                or (matrix_mul_method == "csc_mkl")
-            ):
-                psi_T = psi.T
-                print("conf:", iconf+1, "psi transposed", f"{time.time()-start:.2f}s start till now", flush=True)
-                Avec += dot_product_mkl(psi_T, ref_projs, dense=True)
-                print("conf:", iconf+1, "Avec computed", f"{time.time()-start:.2f}s start till now", flush=True)
-                Bmat += dot_product_mkl(psi_T, dot_product_mkl(over, psi, dense=True), dense=True)
-            else:
-                raise ValueError(f"Unknown matrix multiplication method {matrix_mul_method=}")
+            Avec += np.dot(psi.T,ref_projs)
+            Bmat += np.dot(psi.T,np.dot(over,psi))
+
 
         elif inp.salted.saltedtype=="density-response":
 
@@ -252,14 +211,4 @@ def matrices(trainrange,ntrain,av_coefs,rank,matrix_mul_method: str = "dense"):
     return [Avec,Bmat]
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Build Hessian matrix for SALTED system.")
-    parser.add_argument(
-        "--matmul",
-        "-m",
-        choices=["dense", "sparse", "coo", "csr", "csc", "csr_mkl", "csc_mkl"],
-        default="dense",
-        help="Matrix multiplication format to use (default: dense)"
-    )
-    args = parser.parse_args()
-
-    build(args.matmul)
+    build()
