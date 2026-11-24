@@ -9,6 +9,14 @@ bash playground/baseline.sh
 
 The baseline trains and validates the AIMS water-monomer model with its standard 40 training structures. Each run creates a fresh workspace and Numba cache under `playground/runs/`. The pytest log records timings by stage and density RMSE in percent. GNU time reports elapsed time and maximum resident memory for the pytest invocation. The default is one thread. Set `SALTED_BENCH_THREADS` to compare a different fixed thread count.
 
+On this machine the existing interpreter and both dataset paths are recorded in an ignored shell file. From the repository root:
+
+```bash
+source playground/runs/laptop.env
+"$PYTHON" -m pytest tests/unit -q
+bash playground/baseline.sh
+```
+
 ## Solid-state cases
 
 Set `SALTED_MATRIX_PATH` to the archive containing paired `data_dense_*.npy` overlap matrices and `data_sparse_*.npz` RKHS features. The following check uses this checkout's Numba Hessian engine and an independent SciPy product. It selects 64 occupied feature columns spread across the original width and retains every overlap row.
@@ -27,4 +35,4 @@ The matrix checks exercise one stage. End-to-end density accuracy on a solid nee
 
 ## Worker brief
 
-Record the base commit, hypothesis, editable files, development command, expected effect and trial budget before editing. Return the branch and commit, reproduction commands, numerical differences, repeated timing samples, memory and a one-sentence interpretation. The coordinator records a keep, discard or inconclusive decision after independent verification.
+Copy the [experiment brief](experiment.md) for each trial. Record the base commit, hypothesis, editable files, development command, expected effect and trial budget before editing. Return the branch and commit, reproduction commands, numerical differences, repeated timing samples, memory and a one-sentence interpretation. The coordinator records a keep, discard or inconclusive decision after independent verification.

@@ -10,4 +10,4 @@ Work on the personal fork `zekunlou/SALTED`. Every branch an agent creates must 
 4. Inspect the patch and reproduce the result. Run the relevant unit and integration tests, including a real multi-rank run for MPI changes. Compare performance across repeated runs and check numerical outputs against the reference. Record failed hypotheses and inconclusive results alongside adopted changes.
 5. Summarize the decision, scientific error, runtime and peak memory with their units. Keep raw data, generated models and machine-specific paths local.
 
-Use the installed Arbor skill for campaigns with competing hypotheses. For one change, the brief and measurements in the playground are sufficient.
+Use the installed Arbor skill for campaigns with competing hypotheses. For one change, use the [experiment brief](playground/experiment.md) to record the assignment, evidence and decision.
